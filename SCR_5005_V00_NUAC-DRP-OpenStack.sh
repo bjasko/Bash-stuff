@@ -1,18 +1,17 @@
 #!/bin/bash
 
-# Shell				: Bash
-# Description 		: Small Openstack DRP script 
-# Author			: razique.mahroua@gmail.com
-# Actual version 	: Version 00
-
+# Shell : Bash
+# Description : Small Openstack DRP script 
+# Author : razique.mahroua@gmail.com
+# Actual version : Version 00
 
 # 		Revision note    
 # V00 : Initial version
   
-
-#  		Notes    
+#  		Notes    	
 # This script is used for an Openstack Disaster Recovery Process. The script will be used every time there is a connection loose between the cloud controller and the compute-node.
 # The script has been designed in a way, it uses nova-volumes. Here are the steps the script does :
+#
 # 	1- An array is created for instances and their attached volumes
 # 	2- The MySQL database is updated
 #	3- Using euca2ools, all the instances are restarted
@@ -22,10 +21,10 @@
 #
 #	A test mode is providen, it allows you to speicify an instance id, and only that instance will go through the DRP script. Others instances won't be impacted.
 #	In order to use it, be sure to manually close the iscsi session from the nova-compute.
-#	
+	
 # 		Usage
-# chmod +x SCR_5005_$version_NUAC-DRP-OpenStack
-# ./SCR_5005_$version_NUAC-DRP-OpenStack                      
+# chmod +x SCR_5005_$version_NUAC-DRP-OpenStack.sh
+# ./SCR_5005_$version_NUAC-DRP-OpenStack.sh                     
 
 # Binaries
 	SSH=/usr/bin/ssh
