@@ -13,10 +13,12 @@
 # The difference between the SCR_5004_$version_NUAC-Sauvegarde-Volumes-EBS.sh script is that the logical volume is backuep to a .img.gz file. It is meant to be used in order to have 
 # images backup that could be easily reinjected into another logical volume
 
+# You can specify how many backups you want to keep per file by changing the $dateFileBefore variable. By default, the script, if run every day, keeps 7 (seven) backups.
+
 # A test mode "lvm_limit_one" is available, it allows you to run the whole script for only one LVM volume.
 	
 # 		Usage
-# chmod +x SCR_5007_$version_NUAC-EBS-volumes-backup-to-gzip.sh
+# chmod +x SCR_5007_$version_NUAC-Sauvegarde-Volumes-EBS-vers-gzip.sh
 
 # Binaries
 	MOUNT=/bin/mount
@@ -99,12 +101,21 @@ function create_snapshot () {
 
 # 3- File and applications backups
 function create_gzip () {
-	if [ -d $backup_destination ]; then
+	if [ -d $backup_destination/$2 ]; then
 		echo $dir_exists;
 	else
-		$MKDIR -p $backup_destination;
+		$MKDIR -p $backup_destination/$2;
 	fi
-		$DD if=$1  bs=$block_size | $GZIP -c > $backup_destination/$2.img.gz
+		$DD if=$1  bs=$block_size | $GZIP -c > $backup_destination/$2/$2_$dateFile.img.gz
+		$MD5SUM $backup_destination/$2/$2_$dateFile.img.gz > $backup_destination/$2/$2_$dateFile.checksum
+
+	if [ -f $backup_destination/$2/$2_$dateFileBefore.img.gz ]; then
+		# Old files rotation 
+		$RM $backup_destination/$2/$2_$dateFileBefore.img.gz;
+		$RM $backup_destination/$2/$2_$dateFileBefore.checksum;
+	else 
+		echo $nothing;
+	fi
 }
 
 # 5-Iteration through LVM volumes
@@ -128,8 +139,8 @@ for i in `get_lvs`; do
 	time_accounting `date '+%s'` $startTimeLVM
 	
 	# Mail notification creation
-	backup_size=`$DU -h $backup_destination/\`get_lvs_name $i\`.img.gz | $CUT -f 1`
-	echo -e "$backup_destination/`get_lvs_name $i`.img.gz - $hours h $minutes m and $seconds seconds. Size - $backup_size" >> $email_tmp_file	
+	backup_size=`$DU -h $backup_destination/\`get_lvs_name $i\` | $CUT -f 1`
+	echo -e "$backup_destination/`get_lvs_name $i`- $hours h $minutes m and $seconds seconds. Size - $backup_size" >> $email_tmp_file	
 done
 
 # 6- Mail notification
