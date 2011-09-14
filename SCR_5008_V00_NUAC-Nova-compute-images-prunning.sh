@@ -31,7 +31,7 @@
 	nova_instances_base_dir=/var/lib/nova/instances/_base
 	tmp_file=/tmp/used_images.tmp
 
-$FIND $nova_instances_dir -name disk* | xargs -n1 $QEMU_IMG info | $GREP backing  > $tmp_file
+$FIND $nova_instances_dir -name 'disk*' | xargs -n1 $QEMU_IMG info | $GREP backing  > $tmp_file
 
 $LS $nova_instances_base_dir | while read line; do
 	file_size="Size : `du -sh $nova_instances_base_dir/$line | cut -f 1 -d "/"`"
