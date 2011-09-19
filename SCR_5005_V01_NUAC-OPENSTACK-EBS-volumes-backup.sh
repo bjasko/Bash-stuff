@@ -52,9 +52,11 @@
 	WC=/usr/bin/wc
 	CAT=/bin/cat
 	DU=/usr/bin/du
+	DF=/bin/df
 	SENDMAIL=/usr/sbin/sendmail
 	MOUNT=/bin/mount
 	FIND=/usr/bin/find
+	TAIL=/usr/bin/tail
 # Misc
 	ssh_params="-o StrictHostKeyChecking=no -T -i /root/creds/nuage.pem"
 	ssh_known=/root/.ssh/known_hosts
@@ -70,6 +72,7 @@
 	startTime=`date '+%s'`
 	dateMail=`date '+%d/%m at %H:%M:%S'`
 	dateFile=`date '+%d_%m_%Y'`
+	dateFileBefore=`date --date='2 days ago' '+%d_%m_%Y'`
 # Paths
 	email_tmp_file=/root/ebs_backup_status.tmp
 	backup_destination=/root/BACKUP/EBS-VOL
@@ -80,9 +83,9 @@
 	mailnotifications_disabled="The mail notifications are disabled"
 	mysqldump_disabled="The mysqldumps are disabled"
 	mysql_not_instaled="mysql is not installed, nothing to dump"
-	dir_exists="The backup directory already exists"
-	old_dumps_not_found="Not any old backups to remove..."
-	old_dumps_found="Removing old backups..."
+	dir_exists="The backup directory exists, nothing to do..."
+	old_backups_not_found="Not any old backups to remove..."
+	old_backups_found="Removing old backups..."
 	mount_ok="The backup volume is mounted. Proceed..."
 	mount_ko="The backup volume is not mounted. The backup has been aborted..."
 
@@ -146,10 +149,11 @@ function ssh_connect () {
 			# Old dumps deletion
 			$FIND $mysql_backup_path -type f -name "$mysql_backup_name*" -mtime +$backups_retention_days | wc -l > $find_temp_file
 			if [ \`cat $find_temp_file\` -ge 1 ]; then
-				echo $old_dumps_found
+				echo $old_backups_found
 				$FIND $mysql_backup_path -type f -name "$mysql_backup_name*" -mtime +$backups_retention_days -exec rm -f {} \;
+				rm $find_temp_file
 			else
-				echo $old_dumps_not_found
+				echo $old_backups_not_found
 			fi
 		fi
 	EOF
@@ -176,7 +180,7 @@ function create_tar () {
 		$MKDIR $backup_destination/$2;
 	fi
 		cd $backup_destination/$2
-		#$TAR --exclude={"lost+found","mysql/data","mysql/tmp"} -czf $2_$dateFile.tar.gz -C $mount_point . 
+		$TAR --exclude={"lost+found","mysql/data","mysql/tmp"} -czf $2_$dateFile.tar.gz -C $mount_point . 
 		
 		if [ $enable_checksum -eq 1 ]; then
 			$SHA1SUM $backup_destination/$2/$2_$dateFile.tar.gz > $backup_destination/$2/$2_$dateFile.checksum
@@ -184,9 +188,10 @@ function create_tar () {
 	
 	if [ `$FIND $backup_destination -type f -name "$2*" -mtime +$backups_retention_days | wc -l` -ge 1 ]; then
 		# Old files deletion
+		echo $old_backups_found
 		$FIND $backup_destination -type f -name "$2*" -mtime +$backups_retention_days -exec rm -f {} \;
 	else 
-		echo $nothing;
+		echo $old_backups_not_found;
 	fi
 }
 
@@ -259,7 +264,7 @@ if [ $enable_mail_notification -eq 0 ]; then
 else
 	time_accounting `date '+%s'` $startTime
 	echo -e "---------------------------------------" >> $email_tmp_file
-	echo -e "Total backups size - `$DU -sh $backup_destination | $CUT -f 1`" >> $email_tmp_file
+	echo -e "Total backups size - `$DU -sh $backup_destination | $CUT -f 1` - Used space : `$DF -h $backup_destination | $AWK '{ print $4 }' | $TAIL -n 1`" >> $email_tmp_file
 	echo -e "Total execution time - $hours h $minutes m and $seconds seconds" >> $email_tmp_file
 	echo -e "To : $recipient \nSubject : The EBS volumes have been backed up in $hours h and $minutes mn the $dateMail \n`$CAT $email_tmp_file`" | $SENDMAIL $email_recipient
 fi
