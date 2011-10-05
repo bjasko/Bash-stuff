@@ -11,13 +11,13 @@
 # V02 : In order to speed up the process, md5sum was replaced by sha1sum
 # V03 : Added a loop which ckecks that the backup volume is mounted (via sshfs) for every volume, otherwise the backup is aborted 
 # V04 : The script uses now "find" instead of the "$dateFileBefore" in order to remove old dumps and old backup. We ensure that if the script fails for whatever reason, old files are removed.
+# V05 : Added some extra logging into the create_tar function, so the removed volumes are now emailed ; updated the sections which checks the mount.
 
-#  		Notes    	
 # This script is meant to be launched from you cloud-manager server. It connects to all running instances, 
 # runs a mysqldump (Debian flavor), mounts the snapshoted LVM volumes and create a TAR on a destination directory. You can disable the mysqldumps if you don't use mysql/ or debian's instances.
 # The script can be croned everyday, a rotation makes sure that only a backup per day, for a week exists, while older ones are deleted. When the backup is over, an email is sent to you, with some details.
 
-# A test mode "lvm_limit_one" is available, it allows you to run the whole script for only one LVM volume.
+# A test mode "lvm_test_mode" is available, it allows you to run the whole script for only one LVM volume.
 # There is also two interesting settings : "enable_checksum" which allows you to enable or disable a sha1 checksum on the file. Sometimes it could be important to disable it, since the required time for the checksum 
 # could ve very long depending on the file size
 	
@@ -28,7 +28,7 @@
 # Settings
 	lvm_test_mode=0
 	snapshot_max_size=50
-	backups_retention_days=3
+	backups_retention_days=7
 	enable_checksum=0
 	enable_mysql_dump=1
 	enable_mail_notification=1
@@ -60,7 +60,8 @@
 # Misc
 	ssh_params="-o StrictHostKeyChecking=no -T -i /root/creds/nuage.pem"
 	ssh_known=/root/.ssh/known_hosts
-	ubuntu_ami="ami-0000000b"
+	ubuntu_ami="ami-00000053"
+	san_last_byte=47
 # Mail
 	email_recipient="razique.mahroua@gmail.com"
 # MySQL
@@ -75,7 +76,8 @@
 	dateFileBefore=`date --date='2 days ago' '+%d_%m_%Y'`
 # Paths
 	email_tmp_file=/root/ebs_backup_status.tmp
-	backup_destination=/root/BACKUP/EBS-VOL
+	backup_destination=/BACKUPS/EBS-VOL
+	check_mount=`echo $backup_destination | $CUT -d "/" -f 2`
 	mysql_backup_path=/home/mysql/backup
 	mount_point=/mnt
 	find_temp_file=/tmp/find_result.tmp
@@ -96,7 +98,9 @@ if [ ! -f $email_tmp_file ]; then
 else
 	$CAT /dev/null > $email_tmp_file
 fi
+
 echo -e "Backup Start Time - $dateMail" >> $email_tmp_file
+echo -e "Current retention - $backups_retention_days days \n" >> $email_tmp_file
 
 # 1- Main functions
 ## Fetch volumes infos
@@ -188,10 +192,10 @@ function create_tar () {
 	
 	if [ `$FIND $backup_destination -type f -name "$2*" -mtime +$backups_retention_days | wc -l` -ge 1 ]; then
 		# Old files deletion
-		echo $old_backups_found
+		echo -e "$old_backups_found  : `$FIND $backup_destination -type f -name "$2*" -mtime +$backups_retention_days`" >> $email_tmp_file
 		$FIND $backup_destination -type f -name "$2*" -mtime +$backups_retention_days -exec rm -f {} \;
 	else 
-		echo $old_backups_not_found;
+		echo $old_backups_not_found >> $email_tmp_file
 	fi
 }
 
@@ -206,56 +210,55 @@ fi
 for i in `get_lvs`; do
 	startTimeLVM=`date '+%s'`
 	
-	echo -e "\n ######################### `get_lvs_name $i` #########################"
- 
- 	# We ensure that a backup disk is mounted before proceeding
-	if [ `$MOUNT | $GREP "$backup_destination" | $WC -l` -eq 1 ]; then
+echo -e "\n ######################### `get_lvs_name $i` #########################"
+
+	# We ensure that a backup disk is mounted before proceeding
+	if [ `$MOUNT | $GREP "$check_mount" | $WC -l` -eq 1 ]; then
 		echo -e $mount_ok >> $email_tmp_file
 	else
 		echo $mount_ko >> $email_tmp_file
-	
-		if [ $enable_mail_notification -eq 0 ]; then
-			echo $mailnotifications_disabled
-		else
-			echo -e "---------------------------------------" >> $email_tmp_file
-			echo -e "To : $recipient \nSubject : The EBS volumes backup has been aborted the $dateMail ! \n`$CAT $email_tmp_file`" | $SENDMAIL $email_recipient
-			rm $email_tmp_file
-		fi
-		exit
+
+	if [ $enable_mail_notification -eq 0 ]; then
+		echo $mailnotifications_disabled
+	else
+		echo -e "---------------------------------------" >> $email_tmp_file
+		echo -e "To : $recipient \nSubject : The EBS volumes backup has been aborted the $dateMail ! \n`$CAT $email_tmp_file`" | $SENDMAIL $email_recipient
+		rm $email_tmp_file
+	fi
+	exit
 	fi
 
-  	# Volumes retrieval
-  	echo -e "\n STEP 1 :Snapshot creation"
-  	create_snapshot `get_lvs_name $i` $i $snapshot_max_size 
-	
-  	echo -e "\n STEP 2 : Table partition creation"
-  	sleep 1;
-  	$KPARTX -av $i-SNAPSHOT
-	
-  	echo -e "\n STEP 3 : Volumes mounting"
-  	sleep 1;
+	echo -e "\n STEP 1 :Snapshot creation"
+ 	create_snapshot `get_lvs_name $i` $i $snapshot_max_size 
+
+ 	echo -e "\n STEP 2 : Table partition creation"
+ 	sleep 1;
+ 	$KPARTX -av $i-SNAPSHOT
+
+ 	echo -e "\n STEP 3 : Volumes mounting"
+ 	sleep 1;
 	$MOUNT "/dev/mapper/nova--volumes-volume--`get_lvs_id $i`--SNAPSHOT1" $mount_point
-	
-  	echo -e "\n STEP 4 : Archive creation"
- 	create_tar $i `get_lvs_name $i`
-  
-  	echo -e "\n STEP 5 : Umount volume"
-  	$UMOUNT $mount_point
-  
-  	echo -e "\n STEP 6 : Table partition remove"
-  	sleep 1;
-  	$KPARTX -d $i-SNAPSHOT
-  
-  	echo -e "\n STEP 7 : Snapshot deletion "
+
+	echo -e "\n STEP 4 : Archive creation"
+	create_tar $i `get_lvs_name $i`
+ 
+ 	echo -e "\n STEP 5 : Umount volume"
+ 	$UMOUNT $mount_point
+ 
+ 	echo -e "\n STEP 6 : Table partition remove"
+ 	sleep 1;
+ 	$KPARTX -d $i-SNAPSHOT
+ 
+ 	echo -e "\n STEP 7 : Snapshot deletion "
 	sleep 1;
-  	$LVREMOVE -f $i-SNAPSHOT
+ 	$LVREMOVE -f $i-SNAPSHOT
 
 	#Time accounting per volume
 	time_accounting `date '+%s'` $startTimeLVM
 	
 	# Mail notification creation
 	backup_size=`$DU -h $backup_destination/\`get_lvs_name $i\` | $CUT -f 1`
-	echo -e "$backup_destination/`get_lvs_name $i` - $hours h $minutes m and $seconds seconds. Size - $backup_size" >> $email_tmp_file	
+	echo -e "\t $backup_destination/`get_lvs_name $i` - $hours h $minutes m and $seconds seconds. Size - $backup_size \n" >> $email_tmp_file	
 done
 
 # 6- Mail notification
@@ -264,7 +267,7 @@ if [ $enable_mail_notification -eq 0 ]; then
 else
 	time_accounting `date '+%s'` $startTime
 	echo -e "---------------------------------------" >> $email_tmp_file
-	echo -e "Total backups size - `$DU -sh $backup_destination | $CUT -f 1` - Used space : `$DF -h $backup_destination | $AWK '{ print $4 }' | $TAIL -n 1`" >> $email_tmp_file
+	echo -e "Total backups size - `$DU -sh $backup_destination | $CUT -f 1` - Used space : `$DF -h $backup_destination | $AWK '{ print $5 }' | $TAIL -n 1`" >> $email_tmp_file
 	echo -e "Total execution time - $hours h $minutes m and $seconds seconds" >> $email_tmp_file
 	echo -e "To : $recipient \nSubject : The EBS volumes have been backed up in $hours h and $minutes mn the $dateMail \n`$CAT $email_tmp_file`" | $SENDMAIL $email_recipient
 fi
